@@ -31,6 +31,7 @@ li small{color:var(--dim)}
 .hint{font-size:13px;color:var(--dim);margin:8px 0 0}
 #state{font-size:14px;color:var(--dim)}
 #state.ok{color:var(--ok)} #state.bad{color:var(--bad)}
+#log{margin:0;max-height:220px;overflow:auto;background:var(--bg);border-radius:10px;padding:10px;font:12px/1.4 ui-monospace,Menlo,monospace;color:#c9c5ee;white-space:pre-wrap;word-break:break-all;user-select:text}
 </style>
 </head>
 <body>
@@ -51,7 +52,7 @@ li small{color:var(--dim)}
     <label>ไฟล์เกม (.zip ที่มี .cue + .bin ข้างใน)
       <input type="file" id="gameFile">
     </label>
-    <label>BIOS PS1 (ไม่บังคับ แต่ช่วยให้เข้ากันได้ดีกว่า)
+    <label>BIOS PS1 (ไม่บังคับ ใช้ไฟล์ .bin เดียว เช่น scph5500.bin ไม่ใช่ zip รวม)
       <input type="file" id="biosFile">
     </label>
     <div class="row">
@@ -70,6 +71,11 @@ li small{color:var(--dim)}
   </section>
 
   <section>
+    <h2>บันทึกการทำงาน (ถ้าเกมไม่ขึ้น ถ่ายภาพส่วนนี้ส่งมา)</h2>
+    <pre id="log">ยังไม่มีข้อความ</pre>
+  </section>
+
+  <section>
     <h2>เพื่อนในห้อง</h2>
     <ul id="viewers"><li><small>ยังไม่มีใครเข้าห้อง</small></li></ul>
   </section>
@@ -77,6 +83,23 @@ li small{color:var(--dim)}
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
+// ---------- บันทึกข้อความ/ข้อผิดพลาดให้ดูบนจอ ----------
+const logLines = [];
+function pushLog(kind, args) {
+  let t;
+  try { t = args.map((a) => (a && a.stack) ? a.stack.split('\n')[0] : (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' '); } catch (e) { t = '[log]'; }
+  logLines.push(kind + ' ' + t.slice(0, 240));
+  while (logLines.length > 40) logLines.shift();
+  const el = document.getElementById('log');
+  if (el) { el.textContent = logLines.join('\n'); el.scrollTop = el.scrollHeight; }
+}
+['log', 'warn', 'error'].forEach((k) => {
+  const o = console[k].bind(console);
+  console[k] = (...a) => { pushLog(k === 'error' ? '[ERR]' : k === 'warn' ? '[warn]' : '[log]', a); o(...a); };
+});
+addEventListener('error', (e) => pushLog('[ERR]', [e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno]));
+addEventListener('unhandledrejection', (e) => pushLog('[ERR]', ['promise:', e.reason && (e.reason.message || e.reason)]));
+
 const MAX_BITRATE = 2_500_000; // ลดเป็น 1_500_000 ถ้าภาพกระตุก เพิ่มเป็น 4_000_000 ถ้าเครื่องแรงและเน็ตดี
 
 // ---------- ดักเสียงจากอีมูเลเตอร์ (ต้องทำก่อนโหลด EmulatorJS) ----------
@@ -240,11 +263,16 @@ $('loadBtn').addEventListener('click', () => {
   window.EJS_core = 'psx';
   window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
   window.EJS_gameUrl = URL.createObjectURL(file);
-  window.EJS_gameName = file.name.replace(/\.[^.]+$/, '');
+  window.EJS_gameName = 'dokapon';
   window.EJS_startOnLoaded = true;
   window.EJS_threads = false;
   const bios = $('biosFile').files[0];
-  if (bios) window.EJS_biosUrl = URL.createObjectURL(bios);
+  if (bios && /\.(zip|7z|rar)$/i.test(bios.name)) {
+    console.warn('ข้าม BIOS ' + bios.name + ' (เป็นไฟล์รวม ใช้ไฟล์ .bin เดียวแทน)');
+  } else if (bios) {
+    window.EJS_biosUrl = URL.createObjectURL(bios);
+  }
+  console.log('เกม: ' + file.name + ' ' + Math.round(file.size / 1048576) + ' MB');
   window.EJS_onGameStart = () => {
     $('state').textContent = 'เกมทำงานแล้ว กด "เริ่มสตรีม" ที่แถบด้านบนได้เลย';
     $('state').className = 'ok';
