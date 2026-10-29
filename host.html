@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dokapon Online — โฮสต์</title>
+<style>
+:root{--bg:#14122b;--panel:#201d42;--key:#2c2859;--ink:#f3efe6;--dim:#9a96c0;--gold:#f2c14e;--ok:#4fb286;--bad:#e4586b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.5;
+  font-family:ui-rounded,"Hiragino Maru Gothic ProN","Noto Sans Thai","Sarabun",system-ui,sans-serif}
+.bar{position:sticky;top:0;z-index:20;display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;
+  background:var(--panel);padding:8px 14px;padding-top:calc(8px + env(safe-area-inset-top));border-bottom:2px solid var(--key)}
+.lbl{font-size:12px;color:var(--dim);line-height:1}
+.room{font-size:26px;font-weight:800;letter-spacing:.2em;color:var(--gold);line-height:1.1}
+main{max-width:720px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:4px 0 2px}
+h2{font-size:16px;margin:0 0 8px}
+.sub{color:var(--dim);margin:0 0 14px;font-size:14px}
+#game{width:100%;aspect-ratio:4/3;background:#000;border-radius:14px;overflow:hidden;margin:14px 0}
+section{background:var(--panel);border-radius:16px;padding:14px;margin-bottom:14px}
+label{display:grid;gap:4px;font-size:13px;color:var(--dim);margin-bottom:10px}
+input[type=file]{font:inherit;color:var(--ink);background:var(--bg);border:2px solid var(--key);border-radius:10px;padding:8px 10px;width:100%}
+button{font:inherit;font-weight:700;color:#1b1630;background:var(--gold);border:0;border-radius:10px;padding:9px 14px;cursor:pointer;touch-action:manipulation}
+button.ghost{background:var(--key);color:var(--ink)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+ul{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+li{display:flex;justify-content:space-between;background:var(--bg);border-radius:10px;padding:8px 12px;font-size:15px}
+li small{color:var(--dim)}
+.hint{font-size:13px;color:var(--dim);margin:8px 0 0}
+#state{font-size:14px;color:var(--dim)}
+#state.ok{color:var(--ok)} #state.bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div><div class="lbl">รหัสห้อง</div><div class="room" id="room">------</div></div>
+  <div class="row">
+    <button class="ghost" id="shareBtn" disabled>แชร์ลิงก์</button>
+    <button id="streamBtn" disabled>เริ่มสตรีม</button>
+  </div>
+</header>
+
+<main>
+  <h1>โฮสต์ Dokapon</h1>
+  <p class="sub">เกมรันที่เครื่องนี้เครื่องเดียว เพื่อนรับภาพและเสียง แล้วกดปุ่มจากมือถือของตัวเอง</p>
+
+  <section>
+    <h2>1. โหลดเกม</h2>
+    <label>ไฟล์เกม (.zip ที่มี .cue + .bin ข้างใน)
+      <input type="file" id="gameFile">
+    </label>
+    <label>BIOS PS1 (ไม่บังคับ แต่ช่วยให้เข้ากันได้ดีกว่า)
+      <input type="file" id="biosFile">
+    </label>
+    <div class="row">
+      <button id="loadBtn">เริ่มเกม</button>
+      <span id="state"></span>
+    </div>
+  </section>
+
+  <div id="game"></div>
+
+  <section>
+    <h2>2. สตรีมให้เพื่อน</h2>
+    <p class="hint" style="margin-top:0">กด "แชร์ลิงก์" ส่งให้เพื่อนก่อน พอเกมขึ้นจอแล้วกด "เริ่มสตรีม" ที่แถบด้านบน ถ้าเพื่อนไม่ได้ยินเสียงให้กดอีกครั้งเพื่อรีสตาร์ท เก็บแท็บนี้ไว้ด้านหน้าและอย่าให้จอดับ</p>
+    <p class="hint" id="streamState"></p>
+    <p class="hint">คุณเล่นเป็นผู้เล่น 1 ด้วยปุ่มบนจอของอีมูเลเตอร์ เพื่อนได้ผู้เล่น 2–4 ตามลำดับที่เข้าห้อง</p>
+  </section>
+
+  <section>
+    <h2>เพื่อนในห้อง</h2>
+    <ul id="viewers"><li><small>ยังไม่มีใครเข้าห้อง</small></li></ul>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const MAX_BITRATE = 2_500_000; // ลดเป็น 1_500_000 ถ้าภาพกระตุก เพิ่มเป็น 4_000_000 ถ้าเครื่องแรงและเน็ตดี
+
+// ---------- ดักเสียงจากอีมูเลเตอร์ (ต้องทำก่อนโหลด EmulatorJS) ----------
+const audioDests = new Map();
+const origConnect = AudioNode.prototype.connect;
+AudioNode.prototype.connect = function (dest, ...rest) {
+  const r = origConnect.call(this, dest, ...rest);
+  try {
+    if (typeof AudioDestinationNode !== 'undefined' && dest instanceof AudioDestinationNode) {
+      const ctx = dest.context;
+      let md = audioDests.get(ctx);
+      if (!md) { md = ctx.createMediaStreamDestination(); audioDests.set(ctx, md); }
+      origConnect.call(this, md);
+    }
+  } catch (e) {}
+  return r;
+};
+
+const $ = (id) => document.getElementById(id);
+const viewers = new Map(); // peerId -> {conn, slot, name, call}
+const held = new Map();    // slot -> Set(btn)
+let peer = null, room = '', stream = null, streaming = false, wl = null;
+
+// ---------- ห้อง (PeerJS) ----------
+function genCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const r = crypto.getRandomValues(new Uint32Array(6));
+  return [...r].map((n) => A[n % A.length]).join('');
+}
+
+function openRoom() {
+  room = genCode();
+  peer = new Peer('dokapon-' + room);
+  peer.on('open', () => {
+    $('room').textContent = room;
+    $('shareBtn').disabled = false;
+  });
+  peer.on('connection', onConn);
+  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
+  peer.on('error', (err) => {
+    if (err.type === 'unavailable-id') { peer.destroy(); openRoom(); return; }
+    $('state').textContent = 'ระบบห้องมีปัญหา (' + err.type + ') ลองรีเฟรชหน้านี้';
+    $('state').className = 'bad';
+  });
+}
+openRoom();
+
+function roomLink() { return new URL('play.html?room=' + room, location.href).href; }
+$('shareBtn').addEventListener('click', async () => {
+  const url = roomLink();
+  try {
+    if (navigator.share) await navigator.share({ title: 'เล่น Dokapon ด้วยกัน', text: 'รหัสห้อง ' + room, url });
+    else { await navigator.clipboard.writeText(url); $('shareBtn').textContent = 'คัดลอกแล้ว'; setTimeout(() => $('shareBtn').textContent = 'แชร์ลิงก์', 1500); }
+  } catch (e) {}
+});
+
+function onConn(conn) {
+  conn.on('data', (m) => {
+    if (!m || typeof m !== 'object') return;
+    if (m.type === 'join') {
+      if (viewers.has(conn.peer)) return;
+      const used = new Set([...viewers.values()].map((x) => x.slot));
+      const slot = [1, 2, 3].find((s) => !used.has(s));
+      if (!slot) { conn.send({ type: 'error', message: 'ห้องเต็มแล้ว (เพื่อนได้สูงสุด 3 คน)' }); setTimeout(() => conn.close(), 300); return; }
+      const name = String(m.name || '').trim().slice(0, 20) || 'Player' + (slot + 1);
+      viewers.set(conn.peer, { conn, slot, name, call: null });
+      conn.send({ type: 'joined', slot, name });
+      renderViewers();
+      if (streaming) callViewer(conn.peer);
+    } else if (m.type === 'input') {
+      const x = viewers.get(conn.peer);
+      if (!x || !Number.isInteger(m.btn) || m.btn < 0 || m.btn > 15) return;
+      applyInput(x.slot, m.btn, !!m.down);
+    }
+  });
+  conn.on('close', () => dropViewer(conn.peer));
+  conn.on('error', () => dropViewer(conn.peer));
+}
+
+function renderViewers() {
+  const ul = $('viewers');
+  ul.innerHTML = '';
+  if (!viewers.size) { ul.innerHTML = '<li><small>ยังไม่มีใครเข้าห้อง</small></li>'; return; }
+  for (const x of viewers.values()) {
+    const li = document.createElement('li');
+    li.textContent = x.name;
+    const s = document.createElement('small');
+    s.textContent = 'ผู้เล่น ' + (x.slot + 1);
+    li.appendChild(s);
+    ul.appendChild(li);
+  }
+}
+
+function dropViewer(id) {
+  const x = viewers.get(id);
+  if (!x) return;
+  try { if (x.call) x.call.close(); } catch (e) {}
+  const set = held.get(x.slot);
+  if (set) [...set].forEach((b) => applyInput(x.slot, b, false));
+  viewers.delete(id);
+  renderViewers();
+}
+
+// ---------- ส่งปุ่มจากเพื่อนเข้าเกม ----------
+function applyInput(slot, btn, down) {
+  const gm = window.EJS_emulator && EJS_emulator.gameManager;
+  if (!gm || typeof gm.simulateInput !== 'function') return;
+  let set = held.get(slot);
+  if (!set) { set = new Set(); held.set(slot, set); }
+  down ? set.add(btn) : set.delete(btn);
+  try { gm.simulateInput(slot, btn, down ? 1 : 0); } catch (e) { console.error(e); }
+}
+
+// ---------- สตรีมภาพ/เสียง ----------
+async function keepAwake() { try { if ('wakeLock' in navigator) wl = await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && streaming) keepAwake(); });
+
+function startStream() {
+  const canvas = (window.EJS_emulator && EJS_emulator.canvas) || document.querySelector('#game canvas');
+  if (!canvas) { alert('ยังไม่พบจอเกม ให้เริ่มเกมก่อน'); return; }
+  stream = new MediaStream();
+  canvas.captureStream(60).getVideoTracks().forEach((t) => { try { t.contentHint = 'motion'; } catch (e) {} stream.addTrack(t); });
+  let audioTracks = 0;
+  audioDests.forEach((md) => md.stream.getAudioTracks().forEach((t) => { stream.addTrack(t); audioTracks++; }));
+  streaming = true;
+  keepAwake();
+  viewers.forEach((_, id) => callViewer(id));
+  $('streamBtn').textContent = 'รีสตาร์ทสตรีม';
+  $('streamState').textContent = audioTracks ? 'กำลังสตรีม (มีภาพและเสียง)' : 'กำลังสตรีม (ยังไม่พบเสียง ลองกดอีกครั้งหลังเกมมีเสียงแล้ว)';
+}
+
+function callViewer(id) {
+  const x = viewers.get(id);
+  if (!x || !stream) return;
+  try { if (x.call) x.call.close(); } catch (e) {}
+  const call = peer.call(id, stream);
+  x.call = call;
+  setTimeout(() => {
+    try {
+      for (const s of call.peerConnection.getSenders()) {
+        if (s.track && s.track.kind === 'video') {
+          const p = s.getParameters();
+          if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+          p.encodings[0].maxBitrate = MAX_BITRATE;
+          s.setParameters(p).catch(() => {});
+        }
+      }
+    } catch (e) {}
+  }, 1500);
+}
+$('streamBtn').addEventListener('click', startStream);
+
+// ---------- โหลดเกมด้วย EmulatorJS ----------
+$('loadBtn').addEventListener('click', () => {
+  const file = $('gameFile').files[0];
+  if (!file) { alert('เลือกไฟล์เกมก่อน'); return; }
+  $('loadBtn').disabled = true;
+  $('state').textContent = 'กำลังโหลดอีมูเลเตอร์…';
+
+  window.EJS_player = '#game';
+  window.EJS_core = 'psx';
+  window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+  window.EJS_gameUrl = URL.createObjectURL(file);
+  window.EJS_gameName = file.name.replace(/\.[^.]+$/, '');
+  window.EJS_startOnLoaded = true;
+  window.EJS_threads = false;
+  const bios = $('biosFile').files[0];
+  if (bios) window.EJS_biosUrl = URL.createObjectURL(bios);
+  window.EJS_onGameStart = () => {
+    $('state').textContent = 'เกมทำงานแล้ว กด "เริ่มสตรีม" ที่แถบด้านบนได้เลย';
+    $('state').className = 'ok';
+    $('streamBtn').disabled = false;
+  };
+
+  const s = document.createElement('script');
+  s.src = window.EJS_pathtodata + 'loader.js';
+  s.onerror = () => { $('state').textContent = 'โหลด EmulatorJS ไม่ได้ ตรวจอินเทอร์เน็ต'; $('state').className = 'bad'; $('loadBtn').disabled = false; };
+  document.body.appendChild(s);
+  $('game').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+</script>
+</body>
+</html>
