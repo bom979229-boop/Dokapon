@@ -49,7 +49,7 @@ li small{color:var(--dim)}
 
   <section>
     <h2>1. โหลดเกม</h2>
-    <label>ไฟล์เกม (.zip ที่มี .cue + .bin ข้างใน)
+    <label>ไฟล์เกม (เลือกไฟล์ .bin ตรง ๆ ได้เลย ไม่ต้องใช้ .cue หรือ zip)
       <input type="file" id="gameFile">
     </label>
     <label>BIOS PS1 (ไม่บังคับ ใช้ไฟล์ .bin เดียว เช่น scph5500.bin ไม่ใช่ zip รวม)
@@ -263,7 +263,10 @@ $('loadBtn').addEventListener('click', () => {
   window.EJS_core = 'psx';
   window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
   window.EJS_gameUrl = URL.createObjectURL(file);
-  window.EJS_gameName = 'dokapon';
+  const ext = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+  const raw = ['bin', 'iso', 'img', 'cue', 'chd', 'pbp'].includes(ext);
+  // ไฟล์ดิบ (ไม่ใช่ zip) ต้องบอกนามสกุลให้อีมูเลเตอร์ เพราะลิงก์ blob ไม่มีชื่อไฟล์
+  window.EJS_gameName = raw ? 'dokapon.' + ext : 'dokapon';
   window.EJS_startOnLoaded = true;
   window.EJS_threads = false;
   const bios = $('biosFile').files[0];
